@@ -1,0 +1,18 @@
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/lib/docker/containers/*/*.log
+  fields:
+    simulated: true
+  fields_under_root: true
+
+#output.console:
+#  pretty: true
+
+output.logstash:
+   hosts: ["logstash:5044"]
+
+logging.level: debug
+logging.to_files: false
+logging.to_console: true

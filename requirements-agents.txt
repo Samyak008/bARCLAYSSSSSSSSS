@@ -1,0 +1,10 @@
+crewai>=0.28.0
+rrcf>=0.4.4
+elasticsearch>=8.7.0
+pandas>=2.0.0
+numpy>=1.24.0
+statsmodels>=0.14.0
+scikit-learn>=1.3.0
+schedule>=1.2.0
+requests>=2.29.0
+python-dotenv>=1.0.0

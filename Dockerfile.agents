@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements-agents.txt .
+RUN pip install --no-cache-dir -r requirements-agents.txt
+
+# Copy agent scripts
+COPY agents/ /app/agents/
+
+# Create directories for models
+RUN mkdir -p /app/models
+
+# Set environment variables
+ENV PYTHONPATH=/app
+
+# Entry point
+CMD ["python", "agents/crew_manager.py"]
