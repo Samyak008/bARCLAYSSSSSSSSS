@@ -2,8 +2,18 @@ import time
 import subprocess
 import sys
 import os
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
+
+# Disable telemetry and OpenTelemetry
+os.environ["TELEMETRY_ENABLED"] = "false"
+os.environ["OPENAI_TELEMETRY"] = "false" 
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
+
+# Suppress error logs from telemetry
+logging.getLogger("opentelemetry").setLevel(logging.CRITICAL)
+logging.getLogger("litellm").setLevel(logging.ERROR)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -20,11 +30,11 @@ def ensure_file_exists(filepath):
     except:
         return False
 
-def run_log_simulation(duration=10):
+def run_log_simulation(duration=30, advanced=True):
     """Run the log simulation for a fixed duration"""
     clear_screen()
     print("=" * 80)
-    print(f"STEP 1: Starting log simulation for {duration} seconds...")
+    print(f"STEP 1: Starting {'advanced' if advanced else 'standard'} log simulation for {duration} seconds...")
     print("=" * 80)
     
     # Make sure we're starting with a clean log file
@@ -34,8 +44,15 @@ def run_log_simulation(duration=10):
         with open(log_file, 'w') as f:
             pass  # Just clear the file
     
-    # Check if the simulation script exists
-    sim_script = 'simulate_logs/simuate_logs.py'
+    # Choose the simulation script
+    if advanced:
+        sim_script = 'simulate_logs/advanced_simulation.py'
+        if not os.path.exists(sim_script):
+            print(f"Advanced simulation script not found: {sim_script}, falling back to standard")
+            sim_script = 'simulate_logs/simuate_logs.py'
+    else:
+        sim_script = 'simulate_logs/simuate_logs.py'
+    
     if not os.path.exists(sim_script):
         print(f"Error: Log simulation script not found: {sim_script}")
         return False
@@ -62,25 +79,43 @@ def run_log_simulation(duration=10):
         return size > 0
     return False
 
-def run_anomaly_detection():
-    """Run the file-based anomaly detection"""
+def run_anomaly_detection(enhanced=True):
+    """Run the anomaly detection"""
     clear_screen()
     print("\n" + "=" * 80)
-    print("STEP 2: Running file-based anomaly detection...")
+    print(f"STEP 2: Running {'enhanced' if enhanced else 'standard'} anomaly detection...")
     print("=" * 80 + "\n")
     
     try:
-        from agents.file_based_anomaly_agent import FileBasedAnomalyAgent
-        
-        # Create agent
-        agent = FileBasedAnomalyAgent()
+        if enhanced:
+            # Try to use enhanced agent
+            try:
+                from agents.enhanced_anomaly_agent import EnhancedAnomalyAgent
+                agent = EnhancedAnomalyAgent()
+                print("Using enhanced anomaly detection algorithm")
+            except ImportError:
+                print("Enhanced anomaly agent not found, falling back to standard")
+                from agents.file_based_anomaly_agent import FileBasedAnomalyAgent
+                agent = FileBasedAnomalyAgent()
+        else:
+            # Use standard agent
+            from agents.file_based_anomaly_agent import FileBasedAnomalyAgent
+            agent = FileBasedAnomalyAgent()
         
         # Load logs from file
         logs = agent.load_logs_from_file('api_logs.json')
         
         if logs:
             # Detect anomalies
-            anomalies, indices, scores = agent.detect_anomalies(logs, threshold=0.8)
+            if enhanced:
+                anomalies, indices, scores = agent.detect_anomalies(
+                    logs, 
+                    threshold=0.8, 
+                    use_multidimensional=True, 
+                    contextual_analysis=True
+                )
+            else:
+                anomalies, indices, scores = agent.detect_anomalies(logs, threshold=0.8)
             
             # Print results
             print(f"\nFound {len(anomalies)} anomalies from {len(logs)} logs")
@@ -96,6 +131,7 @@ def run_anomaly_detection():
                     print(f"  Value: {anomaly['value']:.2f} ms")
                     print(f"  API: {anomaly['context'].get('api_name')}")
                     print(f"  Environment: {anomaly['context'].get('environment')}")
+                    print(f"  Status Code: {anomaly['context'].get('status_code', 'unknown')}")
                     print()
                 
                 print("\nSee 'anomaly_detection_results.png' for visualization.")
@@ -109,13 +145,60 @@ def run_anomaly_detection():
             
     except Exception as e:
         print(f"Error running anomaly detection: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return []
-    
-def run_crew_analysis():
-    """Run the CrewAI analysis"""
+
+def run_forecasting(anomalies=None):
+    """Run enhanced forecasting with anomaly integration"""
     clear_screen()
     print("\n" + "=" * 80)
-    print("STEP 3: Running CrewAI analysis for deeper insights...")
+    print("STEP 3: Running enhanced forecasting with anomaly integration...")
+    print("=" * 80 + "\n")
+    
+    try:
+        # Try to use enhanced forecasting
+        try:
+            from agents.enhanced_forecasting import EnhancedForecastingAgent
+            agent = EnhancedForecastingAgent()
+            print("Using enhanced forecasting algorithm")
+        except ImportError:
+            print("Enhanced forecasting agent not found, falling back to standard forecasting")
+            return None
+        
+        # Load logs
+        logs = agent.load_logs_from_file('api_logs.json')
+        
+        if logs:
+            # Generate forecasts
+            forecasts = agent.generate_forecasts(logs, anomalies)
+            
+            # Print results
+            print(f"\nGenerated forecasts for {len(forecasts)} APIs")
+            
+            for api, forecast in list(forecasts.items())[:3]:  # Show first 3
+                print(f"\n{api}:")
+                print(f"  Current Average: {forecast['current_avg']:.2f}ms")
+                print(f"  Forecast Average: {forecast['forecast_avg']:.2f}ms")
+                print(f"  Trend: {forecast['trend']}")
+                print(f"  Risk Level: {forecast.get('risk_level', 'unknown')}")
+            
+            print("\nSee 'forecast_predictions.png' for visualization.")
+            return forecasts
+        else:
+            print("No logs available for forecasting")
+            return None
+    except Exception as e:
+        print(f"Error running forecasting: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def run_crew_analysis(anomalies, forecasts):
+    """Run the CrewAI analysis with enhanced data"""
+    clear_screen()
+    print("\n" + "=" * 80)
+    print("STEP 4: Running CrewAI analysis for deeper insights...")
     print("=" * 80 + "\n")
     
     try:
@@ -124,28 +207,37 @@ def run_crew_analysis():
         # Create the FileCrew
         crew = FileCrew()
         
-        # Run a monitoring cycle
-        result = crew.run_monitoring_cycle('api_logs.json')
+        # Run a monitoring cycle with anomalies and forecasts
+        result = crew.run_enhanced_monitoring_cycle('api_logs.json', anomalies, forecasts)
         
         return result
     except Exception as e:
         print(f"Error running CrewAI analysis: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def main():
     clear_screen()
     print("=" * 80)
-    print("API MONITORING SYSTEM: ANOMALY DETECTION & AGENT ANALYSIS")
+    print("ENHANCED API MONITORING SYSTEM: ANOMALY DETECTION & FORECASTING")
     print("=" * 80)
-    print("\nThis simulation will:")
-    print("1. Generate simulated API logs")
-    print("2. Detect anomalies using RRCF algorithm")
-    print("3. Run CrewAI agents to analyze the anomalies and generate insights")
+    print("\nThis enhanced simulation will:")
+    print("1. Generate advanced simulated API logs with patterns and anomalies")
+    print("2. Detect anomalies using enhanced RRCF algorithm")
+    print("3. Forecast future trends using time-series models")
+    print("4. Run CrewAI agents to analyze and recommend actions")
+    
+    # Ask about simulation options
+    print("\nSimulation options:")
+    use_advanced = input("Use advanced log patterns (y/n)? [y]: ").lower() != 'n'
+    duration = int(input("Duration for log generation in seconds [30]: ") or 30)
+    use_enhanced = input("Use enhanced anomaly detection (y/n)? [y]: ").lower() != 'n'
     
     input("\nPress Enter to begin simulation...")
     
     # Step 1: Run log simulation
-    log_success = run_log_simulation(duration=20)
+    log_success = run_log_simulation(duration=duration, advanced=use_advanced)
     
     if not log_success:
         print("Error: Failed to generate logs. Pipeline stopped.")
@@ -155,10 +247,16 @@ def main():
     input("\nPress Enter to continue to anomaly detection...")
     
     # Step 2: Run anomaly detection
-    anomalies = run_anomaly_detection()
+    anomalies = run_anomaly_detection(enhanced=use_enhanced)
     
-    if not anomalies:
-        print("\nNo anomalies found for CrewAI to analyze.")
+    # Wait for user to continue
+    input("\nPress Enter to continue to forecasting...")
+    
+    # Step 3: Run forecasting
+    forecasts = run_forecasting(anomalies)
+    
+    if not anomalies and not forecasts:
+        print("\nNo data for CrewAI to analyze.")
         choice = input("Continue with CrewAI analysis anyway? (y/n): ").lower()
         if choice != 'y':
             print("Simulation ended.")
@@ -167,11 +265,11 @@ def main():
     # Wait for user to continue
     input("\nPress Enter to continue to CrewAI analysis...")
     
-    # Step 3: Run CrewAI analysis
-    run_crew_analysis()
+    # Step 4: Run CrewAI analysis
+    run_crew_analysis(anomalies, forecasts)
     
     print("\n" + "=" * 80)
-    print("Simulation and Analysis Pipeline Complete!")
+    print("Enhanced Simulation and Analysis Pipeline Complete!")
     print("=" * 80)
 
 if __name__ == "__main__":

@@ -322,6 +322,173 @@ class FileCrew:
             print(error_msg)
             return error_msg
 
+    def run_enhanced_monitoring_cycle(self, log_file='api_logs.json', provided_anomalies=None, provided_forecasts=None):
+        """Run a complete monitoring cycle with CrewAI agents using enhanced data"""
+        print("Starting enhanced CrewAI monitoring cycle...")
+        
+        # Check if LLM is configured
+        if not self.llm:
+            return "ERROR: LLM not configured. Please check your Groq API key."
+        
+        try:
+            # 1. Load logs
+            logs = self.anomaly_agent.load_logs_from_file(log_file)
+            if not logs:
+                print("No logs found. Please generate some logs first.")
+                return "No logs available for analysis"
+            
+            # 2. Use provided anomalies or detect them
+            if provided_anomalies:
+                anomalies = provided_anomalies
+                print(f"Using {len(anomalies)} provided anomalies")
+            else:
+                anomalies, _, _ = self.anomaly_agent.detect_anomalies(logs, threshold=0.8)
+                print(f"Detected {len(anomalies)} anomalies")
+            
+            # 3. Use provided forecasts or generate them
+            if provided_forecasts:
+                forecasts = provided_forecasts
+                print(f"Using provided forecasts for {len(forecasts)} APIs")
+            else:
+                forecasts = self.forecast_metrics(logs, anomalies)
+                print(f"Generated forecasts for {len(forecasts)} APIs")
+            
+            # 4. Analyze request journeys
+            journeys = self.analyze_request_journeys(logs, anomalies)
+            print(f"Analyzed {len(journeys)} request journeys")
+            
+            # Prepare anomaly information for the agents
+            anomaly_details = ""
+            if anomalies:
+                sorted_anomalies = sorted(anomalies, key=lambda x: x['score'], reverse=True)
+                for i, anomaly in enumerate(sorted_anomalies[:10]):
+                    anomaly_details += f"Anomaly {i+1}:\n"
+                    anomaly_details += f"  Score: {anomaly['score']:.2f}\n"
+                    anomaly_details += f"  Value: {anomaly['value']:.2f} ms\n"
+                    anomaly_details += f"  API: {anomaly['context'].get('api_name')}\n"
+                    anomaly_details += f"  Environment: {anomaly['context'].get('environment')}\n"
+                    if 'status_code' in anomaly['context']:
+                        anomaly_details += f"  Status Code: {anomaly['context'].get('status_code')}\n"
+                    if 'timestamp' in anomaly:
+                        anomaly_details += f"  Timestamp: {anomaly['timestamp']}\n"
+                    anomaly_details += "\n"
+            else:
+                anomaly_details = "No significant anomalies detected in this monitoring cycle."
+            
+            # Format journey information
+            journey_details = ""
+            for i, journey in enumerate(journeys[:5]):
+                journey_details += f"Journey {i+1} (ID: {journey['correlation_id']}):\n"
+                journey_details += f"  Steps: {journey['steps']}\n"
+                journey_details += f"  APIs: {' → '.join(journey['apis'])}\n"
+                journey_details += f"  Environments: {', '.join(set(journey['environments']))}\n"
+                journey_details += f"  Total Time: {journey['total_time']}ms\n"
+                journey_details += f"  Contains Anomalies: {'Yes' if journey['contains_anomaly'] else 'No'}\n"
+                journey_details += f"  Contains Errors: {'Yes' if journey['has_errors'] else 'No'}\n\n"
+            
+            # Format forecast information
+            forecast_details = ""
+            high_risk_apis = []
+            medium_risk_apis = []
+            
+            for api, forecast in forecasts.items():
+                risk_level = forecast.get('risk_level', 'low')
+                if risk_level == 'high':
+                    high_risk_apis.append(api)
+                elif risk_level == 'medium':
+                    medium_risk_apis.append(api)
+                    
+                forecast_details += f"API: {api}\n"
+                forecast_details += f"  Current Average: {forecast['current_avg']:.2f}ms\n"
+                forecast_details += f"  Forecast Average: {forecast['forecast_avg']:.2f}ms\n"
+                forecast_details += f"  Trend: {forecast['trend']}\n"
+                forecast_details += f"  Risk Level: {risk_level}\n\n"
+            
+            # Enhanced summary overview
+            summary = (
+                f"# Monitoring Summary\n\n"
+                f"Analyzed {len(logs)} log entries\n"
+                f"Found {len(anomalies)} anomalies\n"
+                f"Tracked {len(journeys)} request journeys\n"
+                f"Generated forecasts for {len(forecasts)} APIs\n\n"
+                f"## Risk Assessment\n"
+                f"High-risk APIs: {', '.join(high_risk_apis) if high_risk_apis else 'None'}\n"
+                f"Medium-risk APIs: {', '.join(medium_risk_apis) if medium_risk_apis else 'None'}\n\n"
+            )
+            
+            # Define CrewAI tasks with enhanced context
+            
+            # Task 1: Anomaly detection and analysis
+            anomaly_task = Task(
+                description=f"Analyze these {len(anomalies)} anomalies and identify patterns. "
+                           f"What might be causing these unusual API response times? "
+                           f"Here are the top anomalies:\n\n{anomaly_details}\n"
+                           f"Consider services dependencies, potential bottlenecks, and infrastructure issues.",
+                agent=self.agents["anomaly_detector"],
+                expected_output="A detailed analysis of the anomaly patterns, potential root causes, and relationships between the anomalies found in the API metrics."
+            )
+            
+            # Task 2: Correlation analysis with enhanced journey data
+            correlation_task = Task(
+                description=f"Analyze these request journeys and identify patterns and dependencies between services. "
+                           f"What service dependencies can be inferred? Are there any bottlenecks or problematic transitions?\n\n"
+                           f"{journey_details}\n"
+                           f"Consider how requests flow between services and environments, and identify any problematic patterns.",
+                agent=self.agents["correlation_expert"],
+                expected_output="An analysis of service dependencies, request flows, and identification of bottlenecks or problematic transitions between services."
+            )
+            
+            # Task 3: Forecasting with enhanced context
+            forecast_task = Task(
+                description=f"Based on the current trends and forecast data, predict how the system will behave in the next hour. "
+                           f"What APIs are likely to experience issues? What's the expected impact?\n\n"
+                           f"{forecast_details}\n"
+                           f"Particularly focus on the high and medium risk APIs. Consider the anomalies already detected and how the trends might evolve.",
+                agent=self.agents["forecaster"],
+                expected_output="A forecast of expected system behavior over the next hour, highlighting potential issues and their likely impact on different services."
+            )
+            
+            # Task 4: Response recommendations with all enhanced data
+            response_task = Task(
+                description=f"Based on the monitoring summary, anomaly analysis, correlation patterns, and forecasts, generate actionable recommendations. "
+                           f"Prioritize the actions based on impact and urgency. "
+                           f"Include specific steps for engineers to follow.\n\n"
+                           f"{summary}\n",
+                agent=self.agents["responder"],
+                context=[anomaly_task, correlation_task, forecast_task],  # Use results from all previous tasks
+                expected_output="A prioritized list of actionable recommendations with specific steps for engineers to resolve the identified issues and prevent forecasted problems."
+            )
+            
+            # Create and run the crew with all agents
+            crew = Crew(
+                agents=[
+                    self.agents["anomaly_detector"],
+                    self.agents["correlation_expert"],
+                    self.agents["forecaster"],
+                    self.agents["responder"]
+                ],
+                tasks=[anomaly_task, correlation_task, forecast_task, response_task],
+                verbose=True,
+                llm=self.llm
+            )
+            
+            # Execute the crew
+            try:
+                print("\nStarting CrewAI analysis with all agents and enhanced data...")
+                result = crew.kickoff()
+                print("\nCrew Analysis Results:")
+                print(result)
+                return result
+            except Exception as e:
+                error_msg = f"Error during CrewAI execution: {str(e)}\n{traceback.format_exc()}"
+                print(error_msg)
+                return error_msg
+                
+        except Exception as e:
+            error_msg = f"Error during monitoring cycle: {str(e)}\n{traceback.format_exc()}"
+            print(error_msg)
+            return error_msg
+
 def main():
     print("Starting complete file-based CrewAI monitoring system...")
     
