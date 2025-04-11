@@ -2,7 +2,7 @@ from crewai import Agent
 from elasticsearch import Elasticsearch
 
 class CorrelationAgent:
-    def __init__(self, es_host="http://elasticsearch:9200"):
+    def __init__(self, es_host="http://localhost:9200"):
         self.es = Elasticsearch([es_host])
     
     def track_request_journeys(self, correlation_id=None, time_window="1h"):

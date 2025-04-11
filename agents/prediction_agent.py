@@ -5,7 +5,7 @@ import numpy as np
 from statsmodels.tsa.arima.model import ARIMA
 
 class PredictionAgent:
-    def __init__(self, es_host="http://elasticsearch:9200"):
+    def __init__(self, es_host="http://localhost:9200"):
         self.es = Elasticsearch([es_host])
     
     def forecast_metrics(self, index_pattern="logstash-*", metric="response_time", 

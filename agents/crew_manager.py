@@ -7,7 +7,7 @@ import time
 import schedule
 
 class MonitoringCrew:
-    def __init__(self, es_host="http://elasticsearch:9200", 
+    def __init__(self, es_host="http://localhost:9200", 
                  slack_webhook=None, email_endpoint=None):
         # Initialize agent instances
         self.anomaly_agent = AnomalyAgent(es_host)
@@ -137,9 +137,20 @@ class MonitoringCrew:
                 self.agents["responder"]
             ],
             tasks=[detect_task, correlate_task, forecast_task, respond_task],
-            verbose=2
+            verbose= True,
         )
         
         # Execute crew
         result = crew.kickoff()
         return result
+
+if __name__ == "__main__":
+    # Create an instance of the monitoring crew
+    print("Starting monitoring crew...")
+    monitoring = MonitoringCrew()
+    
+    # Run a single monitoring cycle for testing
+    monitoring.run_monitoring_cycle()
+    
+    # Uncomment for continuous monitoring
+    # monitoring.schedule_monitoring(interval_minutes=5)

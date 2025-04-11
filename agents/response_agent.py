@@ -4,7 +4,7 @@ import requests
 import json
 
 class ResponseAgent:
-    def __init__(self, es_host="http://elasticsearch:9200", 
+    def __init__(self, es_host="http://localhost:9200", 
                  slack_webhook=None, email_endpoint=None):
         self.es = Elasticsearch([es_host])
         self.slack_webhook = slack_webhook
