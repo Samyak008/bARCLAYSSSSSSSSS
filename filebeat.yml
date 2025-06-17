@@ -2,17 +2,57 @@ filebeat.inputs:
 - type: log
   enabled: true
   paths:
-    - /var/lib/docker/containers/*/*.log
+    - /app/api_logs.json
+  json.keys_under_root: true
+  json.add_error_key: true
+  json.message_key: message
+  json.overwrite_keys: true
+  multiline:
+    pattern: '^{'
+    negate: false
+    match: pattern
   fields:
-    simulated: true
+    type: api_logs
+  fields_under_root: true
+  exclude_lines: ['^$']
+
+- type: container
+  enabled: true
+  paths:
+    - /var/lib/docker/containers/*/*.log
+  json.keys_under_root: true
+  json.add_error_key: true
+  json.message_key: log
+  fields:
+    type: docker_logs
   fields_under_root: true
 
-#output.console:
-#  pretty: true
+processors:
+- decode_json_fields:
+    fields: ["message"]
+    process_array: false
+    max_depth: 1
+    target: ""
+    overwrite_keys: true
+    add_error_key: true
+- add_host_metadata:
+    when.not.contains.tags: forwarded
+- add_docker_metadata: ~
+- drop_fields:
+    fields: ["log.offset", "prospector.type", "beat.name", "input.type"]
+    ignore_missing: true
 
-output.logstash:
-   hosts: ["logstash:5044"]
+setup.template.enabled: true
+setup.template.name: "filebeat"
+setup.template.pattern: "filebeat-*"
+setup.ilm.enabled: false
 
-logging.level: debug
+output.elasticsearch:
+  hosts: ["elasticsearch:9200"]
+  index: "logs-%{+YYYY.MM.dd}"
+
+logging.level: info
 logging.to_files: false
-logging.to_console: true
+logging.to_stdout: true
+
+filebeat.registry.path: /usr/share/filebeat/data/registry

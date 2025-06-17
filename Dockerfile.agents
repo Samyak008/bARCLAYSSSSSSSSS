@@ -2,18 +2,28 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Install system dependencies for numpy and other packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies
 COPY requirements-agents.txt .
 RUN pip install --no-cache-dir -r requirements-agents.txt
+RUN pip install --no-cache-dir elasticsearch~=7.17.0 python-dotenv crewai pandas statsmodels scikit-learn matplotlib
 
-# Copy agent scripts
+# Copy agent scripts and configuration
 COPY agents/ /app/agents/
+COPY *.py /app/
+COPY .env /app/.env
 
 # Create directories for models
 RUN mkdir -p /app/models
 
 # Set environment variables
 ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 
 # Entry point
 CMD ["python", "agents/crew_manager.py"]

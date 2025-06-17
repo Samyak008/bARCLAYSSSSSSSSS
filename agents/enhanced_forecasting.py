@@ -105,11 +105,11 @@ class EnhancedForecastingAgent:
         
         print(f"Selecting best model for {api} with {len(train_data)} points")
         
-        # Define models to try
+        # Define models to try - improved parameter settings
         models = {
-            "arima": ARIMA(train_data, order=(2, 1, 2)),
-            "sarima": SARIMAX(train_data, order=(1, 1, 1), seasonal_order=(1, 0, 0, 60)),
-            "exponential": ExponentialSmoothing(train_data, trend='add', seasonal=None)
+            "arima": ARIMA(train_data, order=(5, 1, 0)),  # More lag components for better pattern capture
+            "sarima": SARIMAX(train_data, order=(2, 1, 2), seasonal_order=(1, 0, 1, 30)),  # Better seasonal components
+            "exponential": ExponentialSmoothing(train_data, trend='add', seasonal=None, damped=True)  # Add damping for stability
         }
         
         # Evaluate each model
@@ -121,17 +121,19 @@ class EnhancedForecastingAgent:
                 print(f"  Fitting {name} model...")
                 model_fit = model.fit(disp=0)
                 forecast = model_fit.forecast(steps=len(validation_data))
-                mse = ((forecast - validation_data) ** 2).mean()
-                errors[name] = mse
+                
+                # Use MAPE instead of MSE for better comparison across different scales
+                mape = np.mean(np.abs((validation_data - forecast) / validation_data)) * 100
+                errors[name] = mape
                 forecasts[name] = forecast
-                print(f"  {name} MSE: {mse:.2f}")
+                print(f"  {name} MAPE: {mape:.2f}%")
             except Exception as e:
                 print(f"  {name} failed: {str(e)}")
                 errors[name] = float('inf')
         
         # Select best model
         best_model = min(errors, key=errors.get)
-        print(f"Best model for {api}: {best_model} (MSE: {errors[best_model]:.2f})")
+        print(f"Best model for {api}: {best_model} (MAPE: {errors[best_model]:.2f}%)")
         
         return best_model, forecasts[best_model] if best_model in forecasts else None
     
@@ -163,12 +165,15 @@ class EnhancedForecastingAgent:
             try:
                 if model_type == "arima":
                     model = ARIMA(series, order=(2, 1, 2))
+                    model_fit = model.fit(disp=0)
                 elif model_type == "sarima":
                     model = SARIMAX(series, order=(1, 1, 1), seasonal_order=(1, 0, 0, 60))
+                    model_fit = model.fit(disp=0)
                 else:  # exponential
                     model = ExponentialSmoothing(series, trend='add', seasonal=None)
+                    model_fit = model.fit()
                 
-                model_fit = model.fit(disp=0)
+                
                 
                 # Forecast future values
                 steps = horizon_minutes * 60  # Convert minutes to seconds
@@ -176,34 +181,52 @@ class EnhancedForecastingAgent:
                 
                 # Store results
                 last_timestamp = series.index[-1]
-                forecast_times = pd.date_range(start=last_timestamp, periods=steps+1, freq='S')[1:]
+                forecast_times = pd.date_range(start=last_timestamp, periods=steps+1, freq='s')[1:]
                 
                 forecast_values = forecast.values if hasattr(forecast, 'values') else forecast
                 
                 current_avg = series.iloc[-60:].mean() if len(series) > 60 else series.mean()
                 forecast_avg = forecast.mean()
                 
-                # Calculate prediction intervals (only for ARIMA/SARIMA)
+                # Calculate prediction intervals with improved accuracy
                 confidence_lower = None
                 confidence_upper = None
-                
+
                 if model_type in ["arima", "sarima"]:
                     try:
-                        # Get prediction intervals
-                        pred_int = model_fit.get_forecast(steps=steps).conf_int(alpha=0.2)
-                        confidence_lower = pred_int.iloc[:, 0].values
-                        confidence_upper = pred_int.iloc[:, 1].values
+                        # Get prediction intervals with tighter alpha
+                        pred_int = model_fit.get_forecast(steps=steps).conf_int(alpha=0.2)  # 80% confidence
+                        
+                        # Ensure lower bounds don't go below zero
+                        confidence_lower = np.maximum(0, pred_int.iloc[:, 0].values)
+                        
+                        # Constrain upper bounds to reasonable values
+                        upper_limit = current_avg * 3  # Cap at 3x current average
+                        confidence_upper = np.minimum(upper_limit, pred_int.iloc[:, 1].values)
                     except Exception as e:
                         print(f"  Error calculating confidence intervals: {str(e)}")
+                elif model_type == "exponential":
+                    # Generate approximate confidence intervals for exponential smoothing
+                    forecast_std = np.std(series.values[-60:]) if len(series) > 60 else np.std(series.values)
+                    time_factor = np.sqrt(np.arange(1, steps+1) / 10)  # Grow uncertainty with time but slower
+                    
+                    confidence_lower = np.maximum(0, forecast_values - 1.28 * forecast_std * time_factor)
+                    confidence_upper = forecast_values + 1.28 * forecast_std * time_factor
                 
-                # Determine trend
-                if forecast_avg > current_avg * 1.2:
+                # Determine trend with more accurate thresholds and incorporate recent data patterns
+                recent_trend = np.polyfit(range(min(30, len(series))), series.iloc[-min(30, len(series)):].values, 1)[0]
+                recent_trend_normalized = recent_trend / current_avg if current_avg > 0 else 0
+
+                forecast_delta = (forecast_avg - current_avg) / current_avg if current_avg > 0 else 0
+
+                # Combine recent trend with forecast delta for better classification
+                if recent_trend_normalized > 0.01 and forecast_delta > 0.15:
                     trend = "strongly_increasing"
-                elif forecast_avg > current_avg * 1.05:
+                elif recent_trend_normalized > 0 and forecast_delta > 0.05:
                     trend = "increasing"
-                elif forecast_avg < current_avg * 0.8:
+                elif recent_trend_normalized < -0.01 and forecast_delta < -0.15:
                     trend = "strongly_decreasing"
-                elif forecast_avg < current_avg * 0.95:
+                elif recent_trend_normalized < 0 and forecast_delta < -0.05:
                     trend = "decreasing"
                 else:
                     trend = "stable"
@@ -252,8 +275,9 @@ class EnhancedForecastingAgent:
         n_cols = min(3, n_apis)
         n_rows = (len(apis_to_plot) + n_cols - 1) // n_cols
         
-        # Create plot
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, n_rows*4), squeeze=False)
+        # Create plot with improved styling
+        plt.style.use('ggplot')
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, n_rows*4.5), squeeze=False)
         
         for i, api in enumerate(apis_to_plot):
             if api not in forecasts:
@@ -265,16 +289,16 @@ class EnhancedForecastingAgent:
             
             # Plot historical data
             series = api_series[api]
-            ax.plot(series.index, series.values, 'b-', label='Historical', alpha=0.7)
+            ax.plot(series.index, series.values, 'b-', linewidth=2, label='Historical')
             
             # Plot forecast
             forecast = forecasts[api]
             forecast_times = [datetime.fromisoformat(t) for t in forecast['forecast_times']]
             forecast_values = forecast['forecast_values']
             
-            ax.plot(forecast_times, forecast_values, 'r-', label='Forecast')
+            ax.plot(forecast_times, forecast_values, 'r-', linewidth=2, label='Forecast')
             
-            # Plot confidence intervals if available
+            # Plot confidence intervals if available with improved appearance
             if forecast['confidence_lower'] is not None and forecast['confidence_upper'] is not None:
                 ax.fill_between(
                     forecast_times,
@@ -283,29 +307,40 @@ class EnhancedForecastingAgent:
                     color='r', alpha=0.2, label='80% Confidence'
                 )
             
-            # Mark anomalies if available
+            # Mark anomalies with more visible indicators
             for anomaly in self.anomalies:
                 if anomaly['context'].get('api_name') == api:
                     try:
                         timestamp = datetime.fromisoformat(anomaly['timestamp'])
                         if timestamp in series.index:
                             ax.scatter([timestamp], [series.loc[timestamp]], 
-                                      color='red', s=50, marker='x')
+                                      color='red', s=120, marker='*', label='Anomaly')
                     except (ValueError, TypeError, KeyError):
                         pass
             
-            # Set title and labels
+            # Set title and labels with improved styling
             risk = forecast.get('risk_level', 'unknown')
-            risk_color = {'high': 'red', 'medium': 'orange', 'low': 'green'}.get(risk, 'black')
-            ax.set_title(f"{api} - {forecast['trend']} (Risk: {risk})", color=risk_color)
-            ax.set_ylabel('Response Time')
+            risk_color = {'high': 'darkred', 'medium': 'darkorange', 'low': 'darkgreen'}.get(risk, 'black')
             
-            # Format x-axis
+            # Remove duplicate legend entries
+            handles, labels = ax.get_legend_handles_labels()
+            by_label = dict(zip(labels, handles))
+            ax.legend(by_label.values(), by_label.keys(), loc='upper left', framealpha=0.9)
+            
+            # Set y-axis minimum to zero
+            ax.set_ylim(bottom=0)
+            
+            # Add grid and more attractive styling
+            ax.grid(True, alpha=0.3, linestyle='--')
+            ax.set_title(f"{api} - {forecast['trend']} (Risk: {risk})", 
+                        fontsize=14, fontweight='bold', color=risk_color)
+            ax.set_ylabel('Response Time (ms)', fontsize=12)
+            ax.set_xlabel('Time', fontsize=12)
+            
+            # Format x-axis with better tick spacing
             ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-            plt.setp(ax.get_xticklabels(), rotation=45)
-            
-            ax.legend()
-            ax.grid(True, alpha=0.3)
+            ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=5))
+            plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
         
         # Hide unused subplots
         for i in range(len(apis_to_plot), n_rows * n_cols):
@@ -314,7 +349,7 @@ class EnhancedForecastingAgent:
             axes[row, col].set_visible(False)
         
         plt.tight_layout()
-        plt.savefig('forecast_predictions.png')
+        plt.savefig('forecast_predictions.png', dpi=300)
         print("Forecast visualization saved to forecast_predictions.png")
 
 def main():

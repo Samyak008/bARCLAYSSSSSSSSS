@@ -209,8 +209,26 @@ def run_crew_analysis(anomalies, forecasts):
         
         # Run a monitoring cycle with anomalies and forecasts
         result = crew.run_enhanced_monitoring_cycle('api_logs.json', anomalies, forecasts)
-        
         return result
+        # Clean up potential duplicate content in the result
+        # if result:
+        #     # Look for repeated sections and clean them up
+        #     result_lines = result.splitlines()
+        #     cleaned_lines = []
+        #     seen_chunks = set()
+            
+        #     for line in result_lines:
+        #         # Use a sliding window approach to detect significant duplicates
+        #         if len(line.strip()) > 20:  # Only check substantial lines
+        #             if line not in seen_chunks:
+        #                 seen_chunks.add(line)
+        #                 cleaned_lines.append(line)
+        #         else:
+        #             cleaned_lines.append(line)
+            
+        #     result = '\n'.join(cleaned_lines)
+        
+        # return result
     except Exception as e:
         print(f"Error running CrewAI analysis: {str(e)}")
         import traceback

@@ -8,14 +8,17 @@ services:
     volumes:
       - ./agents:/app/agents
       - ./models:/app/models
+      - ./api_logs.json:/app/api_logs.json
     environment:
       - ELASTICSEARCH_HOST=http://elasticsearch:9200
       - SLACK_WEBHOOK=${SLACK_WEBHOOK}
       - EMAIL_ENDPOINT=${EMAIL_ENDPOINT}
+      - GROQ_API_KEY=${GROQ_API_KEY}
     networks:
-      - default
+      - elk_network
+    restart: unless-stopped
 
 networks:
-  default:
+  elk_network:
     external: true
-    name: barclaysssssssss_default
+    name: elk_network

@@ -55,40 +55,68 @@ class MonitoringCrew:
         print("Starting monitoring cycle...")
         
         # Step 1: Detect anomalies
-        anomalies = self.anomaly_agent.detect_anomalies()
-        print(f"Detected {len(anomalies)} anomalies")
+        try:
+            anomalies = self.anomaly_agent.detect_anomalies()
+            print(f"Detected {len(anomalies)} anomalies")
+        except Exception as e:
+            print(f"Error detecting anomalies: {str(e)}")
+            print("Continuing with empty anomaly list")
+            anomalies = []
         
         # Step 2: Track request journeys
         journeys = {}
         if anomalies:
-            # Extract correlation IDs from anomalies
-            correlation_ids = list(set([
-                a.get('context', {}).get('correlation_id') 
-                for a in anomalies if 'context' in a and 'correlation_id' in a['context']
-            ]))
-            
-            for cid in correlation_ids:
-                if cid:
-                    result = self.correlation_agent.track_request_journeys(cid)
-                    journeys.update(result)
-                    
-            print(f"Tracked {len(journeys)} request journeys")
+            try:
+                # Extract correlation IDs from anomalies
+                correlation_ids = list(set([
+                    a.get('context', {}).get('correlation_id') 
+                    for a in anomalies if 'context' in a and 'correlation_id' in a['context']
+                ]))
+                
+                for cid in correlation_ids:
+                    if cid:
+                        try:
+                            result = self.correlation_agent.track_request_journeys(cid)
+                            journeys.update(result)
+                        except Exception as e:
+                            print(f"Error tracking journey for correlation ID {cid}: {str(e)}")
+                        
+                print(f"Tracked {len(journeys)} request journeys")
+            except Exception as e:
+                print(f"Error processing request journeys: {str(e)}")
+        else:
+            print("No anomalies to track request journeys for")
         
         # Step 3: Generate predictions
         predictions = {}
-        for api in ["frontend", "inventory", "payment"]:
-            prediction = self.prediction_agent.forecast_metrics(api_name=api)
-            if "error" not in prediction:
-                predictions[api] = prediction
-                
-        print(f"Generated predictions for {len(predictions)} APIs")
+        try:
+            for api in ["frontend", "inventory", "payment"]:
+                try:
+                    prediction = self.prediction_agent.forecast_metrics(api_name=api)
+                    if "error" not in prediction:
+                        predictions[api] = prediction
+                except Exception as e:
+                    print(f"Error generating prediction for {api}: {str(e)}")
+                    
+            print(f"Generated predictions for {len(predictions)} APIs")
+        except Exception as e:
+            print(f"Error during prediction generation: {str(e)}")
+            print("Continuing with empty predictions")
         
         # Step 4: Generate recommendations and alerts
         if anomalies:
-            recommendations = self.response_agent.generate_recommendations(anomalies)
-            alert_status = self.response_agent.send_alerts(recommendations)
-            print(f"Generated {len(recommendations)} recommendations")
-            print(f"Alert status: {alert_status['status']}")
+            try:
+                recommendations = self.response_agent.generate_recommendations(anomalies)
+                try:
+                    alert_status = self.response_agent.send_alerts(recommendations)
+                    print(f"Alert status: {alert_status['status']}")
+                except Exception as e:
+                    print(f"Error sending alerts: {str(e)}")
+                print(f"Generated {len(recommendations)} recommendations")
+            except Exception as e:
+                print(f"Error generating recommendations: {str(e)}")
+        else:
+            print("No anomalies detected, skipping recommendations and alerts")
         
         print("Monitoring cycle completed")
         

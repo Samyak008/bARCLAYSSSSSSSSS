@@ -7,10 +7,20 @@ services:
     environment:
       - discovery.type=single-node
       - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - xpack.security.enabled=false
+      - "ELASTIC_PASSWORD=changeme"
     ports:
       - "9200:9200"
+      - "9300:9300"
     volumes:
-      - elasticsearch:/usr/share/elasticsearch/data
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - elk_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   kibana:
     image: docker.elastic.co/kibana/kibana:7.17.10
@@ -21,6 +31,15 @@ services:
       - elasticsearch
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=changeme
+    networks:
+      - elk_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5601"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   logstash:
     image: docker.elastic.co/logstash/logstash:7.17.10
@@ -33,6 +52,10 @@ services:
       - "9600:9600"
     depends_on:
       - elasticsearch
+    networks:
+      - elk_network
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
 
   filebeat:
     image: docker.elastic.co/beats/filebeat:7.17.10
@@ -40,15 +63,19 @@ services:
     user: root
     command: ["--strict.perms=false"]
     volumes:
-      - ./filebeat.yml:/usr/share/filebeat/filebeat.yml
+      - ./filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./api_logs.json:/app/api_logs.json:ro
     depends_on:
       - logstash
+    networks:
+      - elk_network
 
 volumes:
-  elasticsearch:
+  elasticsearch_data:
+    driver: local
 
 networks:
-  elk:
-    name: elk
+  elk_network:
+    driver: bridge
